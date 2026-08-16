@@ -137,3 +137,7 @@ und einer kurzen Firmenbeschreibung.
 Du bekommst **nicht** jeden Tag eine Mail, sondern nur, wenn wirklich ein
 neuer Trade gemeldet wurde. Der Chart (`pelosi_portfolio.png`) wird aber
 täglich aktualisiert.
+
+---
+
+*Developed with support from Claude Code (Anthropic); the modelling choices, validation and documentation remain my responsibility.*
