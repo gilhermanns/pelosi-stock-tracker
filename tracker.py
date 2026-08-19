@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-Nancy Pelosi Congressional Stock Trade Tracker
-================================================
-Pulls the public House Stock Watcher disclosure feed, isolates transactions
-filed under Nancy Pelosi, cross-references the newest trade against a live
-market quote via yfinance, renders a summary chart, and (optionally) emails
-a formatted alert when a new trade is detected.
+Nancy Pelosi Congressional Disclosure Monitor
+==============================================
+Consumes a configured public-disclosure JSON feed, isolates transactions
+filed under Nancy Pelosi, adds a point-in-time market quote via yfinance,
+renders a summary chart, and can email a neutral notification when a new
+disclosure is detected.
 
-Data source: https://housestockwatcher.com/ (raw JSON feed, no API key required)
+The maintained source is supplied through --data-url, --data-file or
+DISCLOSURE_DATA_URL. The historical House Stock Watcher fallback is retained
+only to provide a clear configuration error when no maintained source is set.
 """
 
 import os
@@ -32,7 +34,7 @@ import yfinance as yf
 DATA_URL = "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
 REPRESENTATIVE_NAME = "Nancy Pelosi"
 CHART_OUTPUT_PATH = "pelosi_portfolio.png"
-LAST_SEEN_FILE = ".last_seen_trade.txt"  # tracks the last alerted transaction id
+LAST_SEEN_FILE = ".last_seen_trade.txt"  # tracks the last notified transaction id
 REQUEST_TIMEOUT_SECONDS = 30
 
 
@@ -173,7 +175,7 @@ def build_summary_chart(pelosi_df: pd.DataFrame, output_path: str = CHART_OUTPUT
         color="white",
     )
 
-    # --- Left panel: breakdown of transaction actions (buy/sell/exchange) ---
+    # --- Left panel: breakdown of disclosed transaction types ---
     action_counts = pelosi_df["type"].value_counts()
     palette = ["#00c896", "#ff5c5c", "#4da6ff", "#f5c542", "#a374ff"]
     colors = [palette[i % len(palette)] for i in range(len(action_counts))]
@@ -222,12 +224,12 @@ def build_summary_chart(pelosi_df: pd.DataFrame, output_path: str = CHART_OUTPUT
 
 
 # ---------------------------------------------------------------------------
-# Email alerting
+# Email notifications
 # ---------------------------------------------------------------------------
-def format_alert_email(
+def format_notification_email(
     transaction: pd.Series, live_price: float | None, company_info: dict
 ) -> str:
-    """Render the exact fixed-width alert template for the newest transaction."""
+    """Render a neutral fixed-width notification for the newest disclosure."""
     ticker = str(transaction.get("ticker", "N/A")).upper()
     action = str(transaction.get("type", "N/A")).upper()
     filing_date = transaction.get("disclosure_date")
@@ -239,7 +241,7 @@ def format_alert_email(
     price_str = f"{live_price:,.2f}" if live_price is not None else "N/A"
 
     return f"""============================================================
-NANCY PELOSI COPY-TRADE ALGORITHM ALERT
+NANCY PELOSI PUBLIC DISCLOSURE MONITOR
 ============================================================
 Representative:   Nancy Pelosi
 Ticker Symbol:    {ticker}
@@ -257,18 +259,18 @@ Sector:           {company_info['sector']}
 Industry:         {company_info['industry']}
 About:            {company_info['summary']}
 
-RESEARCH NOTE:
-This delayed public disclosure is informational only and is not an
-instruction to buy, sell, or copy a transaction. Review source documents,
-liquidity, valuation, suitability, and your own risk process independently.
-Federal filing requirements mean this trade was originally executed
-15 to 45 days prior to today's filing.
+RESEARCH BOUNDARY:
+This delayed public disclosure is informational only. It does not
+rank, score or recommend a transaction. Review source documents,
+liquidity, valuation, suitability and your own risk process independently.
+Federal filing requirements mean this transaction may have been executed
+15 to 45 days before today's filing.
 ============================================================
 """
 
 
-def send_email_alert(subject: str, body: str) -> None:
-    """Dispatch the alert email via SMTP using environment-provided credentials."""
+def send_email_notification(subject: str, body: str) -> None:
+    """Dispatch the disclosure notification via environment-provided SMTP credentials."""
     sender_email = os.environ.get("SENDER_EMAIL")
     receiver_email = os.environ.get("RECEIVER_EMAIL")
     smtp_password = os.environ.get("SMTP_PASSWORD")
@@ -295,13 +297,13 @@ def send_email_alert(subject: str, body: str) -> None:
             server.login(sender_email, smtp_password)
             server.sendmail(sender_email, [receiver_email], msg.as_string())
 
-        print(f"Alert email sent to {receiver_email}.")
+        print(f"Disclosure notification sent to {receiver_email}.")
     except Exception as exc:
-        print(f"Error sending email alert: {exc}")
+        print(f"Error sending disclosure notification: {exc}")
 
 
 # ---------------------------------------------------------------------------
-# New-trade detection (avoids re-alerting on every scheduled run)
+# New-disclosure detection (avoids duplicate notifications on scheduled runs)
 # ---------------------------------------------------------------------------
 def transaction_id(transaction: pd.Series) -> str:
     """Build a stable identifier for a transaction to detect duplicates across runs."""
@@ -312,7 +314,7 @@ def transaction_id(transaction: pd.Series) -> str:
 
 
 def is_new_transaction(transaction: pd.Series) -> bool:
-    """Check the last-seen marker file to decide whether this trade was already alerted."""
+    """Check the last-seen marker file to avoid duplicate notifications."""
     current_id = transaction_id(transaction)
 
     if not os.path.exists(LAST_SEEN_FILE):
@@ -325,7 +327,7 @@ def is_new_transaction(transaction: pd.Series) -> bool:
 
 
 def record_seen_transaction(transaction: pd.Series) -> None:
-    """Persist the newest transaction's id so future runs don't duplicate the alert."""
+    """Persist the newest transaction id so future runs do not notify twice."""
     with open(LAST_SEEN_FILE, "w") as f:
         f.write(transaction_id(transaction))
 
@@ -370,16 +372,16 @@ def main() -> int:
     )
 
     if not is_new_transaction(newest_transaction):
-        print("No new trade since the last run. No alert email will be sent.")
+        print("No new disclosure since the last run. No email notification will be sent.")
         return 0
 
     live_price = get_live_price(ticker)
     company_info = get_company_info(ticker)
-    email_body = format_alert_email(newest_transaction, live_price, company_info)
+    email_body = format_notification_email(newest_transaction, live_price, company_info)
     print(email_body)
 
-    send_email_alert(
-        subject=f"Pelosi Copy-Trade Alert: {ticker} {newest_transaction.get('type')}",
+    send_email_notification(
+        subject=f"Pelosi public disclosure: {ticker} {newest_transaction.get('type')}",
         body=email_body,
     )
 

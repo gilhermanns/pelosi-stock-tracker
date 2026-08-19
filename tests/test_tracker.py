@@ -47,11 +47,12 @@ def test_fetch_all_transactions_explains_unavailable_remote_source(monkeypatch):
         tracker.fetch_all_transactions(data_url="https://example.invalid/feed.json")
 
 
-def test_filter_and_alert_are_informational():
+def test_filter_and_notification_is_informational():
     filtered = tracker.filter_pelosi_transactions(pd.DataFrame(sample_transactions()))
     newest = tracker.get_newest_transaction(filtered)
-    body = tracker.format_alert_email(newest, 123.45, {"name": "Apple", "sector": "Tech", "industry": "Hardware", "summary": "Example."})
+    body = tracker.format_notification_email(newest, 123.45, {"name": "Apple", "sector": "Tech", "industry": "Hardware", "summary": "Example."})
 
     assert newest["ticker"] == "AAPL"
     assert "informational only" in body
-    assert "instruction to buy" in body
+    assert "does not\nrank, score or recommend" in body
+    assert "COPY-TRADE" not in body
