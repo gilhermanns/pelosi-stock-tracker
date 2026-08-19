@@ -1,0 +1,51 @@
+name: Disclosure Tracker
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+    inputs:
+      data_url:
+        description: "Optional maintained normalized disclosure-feed URL"
+        required: false
+        type: string
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r requirements.txt
+      - run: python -m pytest -q
+
+  run-tracker:
+    needs: test
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.DISCLOSURE_DATA_URL != '' }}
+    runs-on: ubuntu-latest
+    env:
+      DISCLOSURE_DATA_URL: ${{ inputs.data_url || vars.DISCLOSURE_DATA_URL }}
+      SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+      RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      SMTP_HOST: ${{ vars.SMTP_HOST }}
+      SMTP_PORT: ${{ vars.SMTP_PORT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r requirements.txt
+      - run: python tracker.py --data-url "$DISCLOSURE_DATA_URL"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pelosi-disclosure-chart
+          path: pelosi_portfolio.png
+          if-no-files-found: error
+

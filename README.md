@@ -38,10 +38,11 @@ Industry:         Semiconductors
 About:            NVIDIA designs graphics processing units and AI hardware.
 
 ACTION SUGGESTION:
-Review buying or executing an order for NVDA at or near
-the live target price of $123.45 if this matches your
-risk matrix. Remember, federal filing requirements mean this trade
-was originally executed 15 to 45 days prior to today's filing.
+This delayed public disclosure is informational only and is not an
+instruction to buy, sell, or copy a transaction. Review source documents,
+liquidity, valuation, suitability, and your own risk process independently.
+Federal filing requirements mean this trade was originally executed
+15 to 45 days prior to today's filing.
 ============================================================
 ```
 
@@ -50,7 +51,8 @@ was originally executed 15 to 45 days prior to today's filing.
 ```
 tracker.py                       # core application script
 requirements.txt                 # Python dependencies
-.github/workflows/run_tracker.yml  # daily automation (GitHub Actions)
+tests/test_tracker.py            # offline unit tests
+.github/workflows/tracker.yml    # CI plus optional scheduled live run
 ```
 
 ## 1. Connect your email (one-time setup)
@@ -73,19 +75,20 @@ Using a different provider? The script also honors optional `SMTP_HOST` and
 `SMTP_PORT` env vars/secrets if you need something other than Gmail's
 `smtp.gmail.com:465`.
 
-## 2. Automated daily run
+## 2. Continuous tests and optional scheduled run
 
-`.github/workflows/run_tracker.yml` runs automatically **once a day at
-13:00 UTC**, and can also be triggered manually any time from the
-**Actions** tab → **Nancy Pelosi Stock Tracker** → **Run workflow**.
+`.github/workflows/tracker.yml` runs the offline test suite on every push and
+pull request. It also includes a daily, optional tracker job and a manual
+workflow dispatch.
 
-Each run:
-1. Installs Python + dependencies.
-2. Runs `tracker.py`.
-3. Commits the refreshed `pelosi_portfolio.png` chart back to the repo automatically (only if it changed).
+The scheduled live job is deliberately skipped until a maintainer configures
+the repository variable `DISCLOSURE_DATA_URL` with a maintained normalized JSON
+feed. This prevents a recurring failed job when an external aggregator changes
+its access policy. A manual run can alternatively supply the URL as an input.
 
-No further setup needed once the three secrets above are in place — the
-schedule fires on its own from this repo's default branch.
+Each successful live run installs Python dependencies, runs `tracker.py` using
+the configured source, and uploads the refreshed chart as an Action artifact.
+It does not auto-commit market-derived output back into the source repository.
 
 ## 3. Running it locally (optional)
 
@@ -97,9 +100,24 @@ export SMTP_PASSWORD="your-16-char-app-password"
 python tracker.py
 ```
 
-Prints the newest disclosed trade, updates `pelosi_portfolio.png`, and sends
-an email only if it's new since the last recorded trade (tracked in the
-local `.last_seen_trade.txt`).
+For a maintained remote source, set `DISCLOSURE_DATA_URL` or use an explicit
+argument:
+
+```bash
+python tracker.py --data-url "https://your-maintained-source.example/disclosures.json"
+```
+
+For a reproducible review, use a local normalized public disclosure export:
+
+```bash
+python tracker.py --data-file path/to/disclosures.json
+```
+
+The JSON must be a list of transaction records containing at least
+`representative`, `transaction_date`, `disclosure_date`, `ticker`, `type`, and
+`amount`. The tracker prints the newest disclosed trade, updates
+`pelosi_portfolio.png`, and sends an email only if it is new since the last
+recorded trade (tracked in the local `.last_seen_trade.txt`).
 
 ## 4. Why you won't get a daily email regardless
 
@@ -110,7 +128,9 @@ filings.
 
 ## Data & disclaimer
 
-- Source: House Stock Watcher's public feed, aggregating official U.S. House financial disclosures.
+- Source: a maintainer-configured normalized public disclosure export. The prior
+  House Stock Watcher S3 export returned HTTP 403 during validation, so it is no
+  longer presented as an always-available dependency.
 - Federal law gives members of Congress 15–45 days to file after executing a trade, so "Trade Date" is always historical.
 - This tool is informational only — **not investment advice**.
 

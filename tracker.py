@@ -13,8 +13,11 @@ Data source: https://housestockwatcher.com/ (raw JSON feed, no API key required)
 import os
 import smtplib
 import sys
+import argparse
+import json
 from datetime import datetime
 from email.mime.text import MIMEText
+from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")  # headless rendering for CI/CD runners
@@ -36,12 +39,40 @@ REQUEST_TIMEOUT_SECONDS = 30
 # ---------------------------------------------------------------------------
 # Data sourcing
 # ---------------------------------------------------------------------------
-def fetch_all_transactions() -> pd.DataFrame:
-    """Download the full House Stock Watcher disclosure feed as a DataFrame."""
-    print(f"Fetching disclosure feed from {DATA_URL} ...")
-    response = requests.get(DATA_URL, timeout=REQUEST_TIMEOUT_SECONDS)
-    response.raise_for_status()
-    df = pd.DataFrame(response.json())
+def fetch_all_transactions(
+    data_url: str | None = None, data_file: str | None = None
+) -> pd.DataFrame:
+    """Load a normalized public disclosure export from a URL or local JSON file.
+
+    ``data_file`` is intentionally supported because third-party disclosure feeds
+    can change access rules. It accepts a JSON list of transaction records with the
+    same schema as the previous feed; no synthetic transactions are created.
+    """
+    if data_file:
+        path = Path(data_file)
+        if not path.is_file():
+            raise FileNotFoundError(f"Disclosure JSON file not found: {path}")
+        print(f"Loading disclosure data from {path} ...")
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    else:
+        source_url = data_url or os.environ.get("DISCLOSURE_DATA_URL") or DATA_URL
+        print(f"Fetching disclosure feed from {source_url} ...")
+        try:
+            response = requests.get(source_url, timeout=REQUEST_TIMEOUT_SECONDS)
+            response.raise_for_status()
+            payload = response.json()
+        except requests.RequestException as exc:
+            raise RuntimeError(
+                "The configured disclosure feed is unavailable. Supply a maintained "
+                "normalized feed with DISCLOSURE_DATA_URL or pass --data-file with a "
+                "public disclosure JSON export. No trade data was generated."
+            ) from exc
+
+    if not isinstance(payload, list):
+        raise ValueError("Unexpected data schema: expected a JSON list of transactions.")
+
+    df = pd.DataFrame(payload)
     print(f"Retrieved {len(df)} total transactions across all representatives.")
     return df
 
@@ -226,11 +257,12 @@ Sector:           {company_info['sector']}
 Industry:         {company_info['industry']}
 About:            {company_info['summary']}
 
-ACTION SUGGESTION:
-Review buying or executing an order for {ticker} at or near
-the live target price of ${price_str} if this matches your
-risk matrix. Remember, federal filing requirements mean this trade
-was originally executed 15 to 45 days prior to today's filing.
+RESEARCH NOTE:
+This delayed public disclosure is informational only and is not an
+instruction to buy, sell, or copy a transaction. Review source documents,
+liquidity, valuation, suitability, and your own risk process independently.
+Federal filing requirements mean this trade was originally executed
+15 to 45 days prior to today's filing.
 ============================================================
 """
 
@@ -301,9 +333,25 @@ def record_seen_transaction(transaction: pd.Series) -> None:
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Summarize public Nancy Pelosi transaction disclosures."
+    )
+    parser.add_argument(
+        "--data-url",
+        help="Optional URL for a maintained normalized JSON disclosure feed.",
+    )
+    parser.add_argument(
+        "--data-file",
+        help="Optional local normalized JSON disclosure export for reproducible runs.",
+    )
+    return parser.parse_args()
+
+
 def main() -> int:
+    args = parse_args()
     try:
-        raw_df = fetch_all_transactions()
+        raw_df = fetch_all_transactions(data_url=args.data_url, data_file=args.data_file)
         pelosi_df = filter_pelosi_transactions(raw_df)
     except Exception as exc:
         print(f"Fatal error while sourcing/filtering data: {exc}", file=sys.stderr)
